@@ -1,0 +1,20 @@
+{
+  "users": [
+    {
+      "id": "u1",
+      "name": "Alice",
+      "room_no": "A-101",
+      "hostel_no": "H1",
+      "role": "student"
+    },
+    {
+      "id": "u2",
+      "name": "Rector Raj",
+      "room_no": "-",
+      "hostel_no": "H1",
+      "role": "rector"
+    }
+  ],
+  "longLeaves": [],
+  "shortLeaves": []
+}

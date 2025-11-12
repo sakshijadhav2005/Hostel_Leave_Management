@@ -1,0 +1,22 @@
+@import "tailwindcss";
+
+
+
+@layer base {
+  :root {
+    --bg: 255 255 255;
+    --fg: 17 24 39; /* gray-900 */
+  }
+  html, body, #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-white text-gray-900 antialiased;
+  }
+}
+
+@layer utilities {
+  .sr-only-focusable:focus {
+    @apply not-sr-only;
+  }
+}
