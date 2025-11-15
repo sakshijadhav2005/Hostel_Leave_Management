@@ -48,6 +48,8 @@ function shortLeave(doc) {
     reason: doc.reason,
     out_time: doc.out_time,
     return_time: doc.return_time,
+    // include createdAt for clients that reference `created_at`
+    created_at: doc.createdAt || doc.created_at || null,
     status: doc.status,
   }
 }

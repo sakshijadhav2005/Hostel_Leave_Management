@@ -38,5 +38,18 @@ module.exports = {
       },
     },
   },
+  },
+  safelist: [
+    // Keep legacy gradient utility classes and common arbitrary heights used in the UI
+    { pattern: /bg-gradient-to-(r|br|b|l|tl|tr)/ },
+    { pattern: /from-[a-z0-9-\/]+/ },
+    { pattern: /via-[a-z0-9-\/]+/ },
+    { pattern: /to-[a-z0-9-\/]+/ },
+    { pattern: /bg-clip-text/ },
+    { pattern: /break-words/ },
+    { pattern: /min-h-\[44px\]/ },
+    { pattern: /min-h-\[48px\]/ },
+  ],
   plugins: [],
 };
+

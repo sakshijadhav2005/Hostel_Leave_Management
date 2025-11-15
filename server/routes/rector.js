@@ -1,16 +1,17 @@
 const express = require('express')
 const { authRequired, requireRole } = require('../middleware/auth')
-const { getRectorLongLeaves, getRectorShortLeaves, approveLongLeave, rejectLongLeave, markShortReturned } = require('../controllers/leavesController')
+const { getRectorLongLeaves, getRectorShortLeaves, approveLongLeave, rejectLongLeave, markShortReturned, markShortOut } = require('../controllers/leavesController')
 const { listStudents, updateStudent, deleteStudent } = require('../controllers/rectorController')
 
 const router = express.Router()
 
 // rector leaves
-router.get('/long-leaves', authRequired, requireRole('admin'), getRectorLongLeaves)
-router.get('/short-leaves', authRequired, requireRole('admin'), getRectorShortLeaves)
-router.post('/short-leaves/:id/mark-returned', authRequired, requireRole('admin'), markShortReturned)
-router.post('/long-leaves/:id/approve', authRequired, requireRole('admin'), approveLongLeave)
-router.post('/long-leaves/:id/reject', authRequired, requireRole('admin'), rejectLongLeave)
+router.get('/long-leaves', authRequired, requireRole('admin', 'rector'), getRectorLongLeaves)
+router.get('/short-leaves', authRequired, requireRole('admin', 'rector'), getRectorShortLeaves)
+router.post('/short-leaves/:id/mark-returned', authRequired, requireRole('admin', 'rector'), markShortReturned)
+router.post('/short-leaves/:id/mark-out', authRequired, requireRole('admin', 'rector'), markShortOut)
+router.post('/long-leaves/:id/approve', authRequired, requireRole('admin', 'rector'), approveLongLeave)
+router.post('/long-leaves/:id/reject', authRequired, requireRole('admin', 'rector'), rejectLongLeave)
 
 // rector students
 router.get('/students', authRequired, requireRole('admin'), listStudents)

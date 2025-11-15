@@ -3,7 +3,7 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { getRectorLongLeaves, getRectorShortLeaves, approveLongLeave, rejectLongLeave, getRectorStudents, updateRectorStudent, deleteRectorStudent, markShortLeaveReturned, getRectorComplaints, updateComplaintStatus } from '../lib/api'
+import { getRectorLongLeaves, getRectorShortLeaves, approveLongLeave, rejectLongLeave, getRectorStudents, updateRectorStudent, deleteRectorStudent, markShortLeaveReturned, markShortLeaveOut, getRectorComplaints, updateComplaintStatus } from '../lib/api'
 import { Link, useNavigate } from 'react-router-dom'
 import { Home as HomeIcon } from 'lucide-react'
 import StatusBadge from '../components/StatusBadge'
@@ -29,18 +29,44 @@ export default function RectorDashboard() {
   const { data: sls = [] } = useQuery({ queryKey: ['r','short'], queryFn: getRectorShortLeaves, refetchInterval: 5000 })
   const { data: studs = [] } = useQuery({ queryKey: ['r','students'], queryFn: getRectorStudents })
   const { data: complaints = [] } = useQuery({ queryKey: ['r','complaints'], queryFn: getRectorComplaints })
-  const upd = useMutation({ mutationFn: ({ id, payload }) => updateRectorStudent(id, payload), onSuccess: () => { toast.success('Student updated'); qc.invalidateQueries({ queryKey: ['r','students'] }) } })
-  const del = useMutation({ mutationFn: deleteRectorStudent, onSuccess: () => { toast.success('Student deleted'); qc.invalidateQueries({ queryKey: ['r','students'] }) } })
+  
+  const upd = useMutation({
+    mutationFn: ({ id, payload }) => updateRectorStudent(id, payload),
+    onSuccess: () => { toast.success('Student updated'); qc.invalidateQueries({ queryKey: ['r','students'] }) },
+    onError: (err) => { const msg = err?.response?.data?.error || err?.message || 'Update failed'; toast.error(msg) }
+  })
+  const del = useMutation({
+    mutationFn: deleteRectorStudent,
+    onSuccess: () => { toast.success('Student deleted'); qc.invalidateQueries({ queryKey: ['r','students'] }) },
+    onError: (err) => { const msg = err?.response?.data?.error || err?.message || 'Delete failed'; toast.error(msg) }
+  })
 
-  const approve = useMutation({ mutationFn: approveLongLeave, onSuccess: () => { toast.success('Approved'); qc.invalidateQueries({ queryKey: ['r','long'] }) } })
-  const reject = useMutation({ mutationFn: rejectLongLeave, onSuccess: () => { toast.error('Rejected'); qc.invalidateQueries({ queryKey: ['r','long'] }) } })
-  const markRet = useMutation({ mutationFn: markShortLeaveReturned, onSuccess: () => { toast.success('Marked returned'); qc.invalidateQueries({ queryKey: ['r','short'] }) } })
+  const approve = useMutation({
+    mutationFn: approveLongLeave,
+    onSuccess: () => { toast.success('Approved'); qc.invalidateQueries({ queryKey: ['r','long'] }) },
+    onError: (err) => { const msg = err?.response?.data?.error || err?.message || 'Approve failed'; toast.error(msg) }
+  })
+  const reject = useMutation({
+    mutationFn: rejectLongLeave,
+    onSuccess: () => { toast.error('Rejected'); qc.invalidateQueries({ queryKey: ['r','long'] }) },
+    onError: (err) => { const msg = err?.response?.data?.error || err?.message || 'Reject failed'; toast.error(msg) }
+  })
+  const markRet = useMutation({
+    mutationFn: markShortLeaveReturned,
+    onSuccess: () => { toast.success('Marked returned'); qc.invalidateQueries({ queryKey: ['r','short'] }) },
+    onError: (err) => { const msg = err?.response?.data?.error || err?.message || 'Mark returned failed'; toast.error(msg) }
+  })
+  const markOut = useMutation({
+    mutationFn: markShortLeaveOut,
+    onSuccess: () => { toast.success('Marked Out'); qc.invalidateQueries({ queryKey: ['r','short'] }) },
+    onError: (err) => { const msg = err?.response?.data?.error || err?.message || 'Mark out failed'; toast.error(msg) }
+  })
   const [tab, setTab] = useState('short')
   const [selectedDate, setSelectedDate] = useState(formatLocalDateYYYYMMDD())
   const [selectedHostel, setSelectedHostel] = useState('All')
 
   useEffect(() => {
-    const socket = io(API_URL, { transports: ['websocket'], path: '/socket.io' })
+    const socket = io(API_URL, { path: '/socket.io' })
     const onShortLeaveCreated = (payload) => {
       const s = payload?.student || {}
       const msg = `${s.name || 'A student'} from Hostel ${s.hostel_no || '-'} Room ${s.room_no || '-'} is OUT. Reason: ${payload?.reason || '-'} at ${payload?.out_time ? new Date(payload.out_time).toLocaleString() : ''}`
@@ -66,7 +92,8 @@ export default function RectorDashboard() {
     tab === 'long'
       ? lls.filter(it => isOnDate(it.submit_time, selectedDate))
       : tab === 'short'
-        ? sls.filter(it => isOnDate(it.out_time, selectedDate))
+        ? // include pending requests (no out_time yet) as well as leaves with out_time on the selected date
+          sls.filter(it => it.status === 'Pending' || isOnDate(it.out_time, selectedDate))
         : tab === 'complaints'
           ? complaints.filter(it => isOnDate(it.created_at, selectedDate))
           : studs
@@ -99,26 +126,114 @@ export default function RectorDashboard() {
     return items.reduce((acc, it) => { const h = pickHostel(it) || 'Unknown'; (acc[h] ||= []).push(it); return acc }, {})
   }
 
+  function formatDateTime(dateStr) {
+    if (!dateStr || dateStr === 'null' || dateStr === 'undefined') return '-'
+    try {
+      const date = new Date(dateStr)
+      if (isNaN(date.getTime())) return '-'
+      return date.toLocaleString('en-IN', {
+        day: '2-digit',
+        month: '2-digit', 
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true
+      })
+    } catch {
+      return '-'
+    }
+  }
+
+  function formatDate(dateStr) {
+    if (!dateStr || dateStr === 'null' || dateStr === 'undefined') return '-'
+    try {
+      const date = new Date(dateStr)
+      if (isNaN(date.getTime())) return '-'
+      return date.toLocaleDateString('en-IN', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric'
+      })
+    } catch {
+      return '-'
+    }
+  }
+
+  function safeString(value) {
+    if (value === null || value === undefined || value === 'null' || value === 'undefined') return '-'
+    return String(value).trim() || '-'
+  }
+
   function drawTable(doc, startX, startY, columns, rows) {
     const pageHeight = doc.internal.pageSize.getHeight()
-    const marginY = 40
-    const headerH = 18
+    const marginY = 50
+    const headerH = 22
     let y = startY
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(10)
-    columns.forEach(col => { doc.rect(startX, y, col.w, headerH); doc.text(col.title, startX + 3, y + 12); startX += col.w })
+    
+    // Draw header with better styling
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(10)
+    let hx = startX
+    columns.forEach(col => { 
+      doc.rect(hx, y, col.w, headerH, 'S') // Stroke only, no fill
+      doc.setTextColor(0, 0, 0) // Black text
+      // Center header text in its column
+      doc.text(col.title, hx + col.w / 2, y + 14, { align: 'center' })
+      hx += col.w 
+    })
     y += headerH
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(9)
-    rows.forEach(row => {
-      const wrapped = row.map((cell, i) => doc.splitTextToSize(String(cell ?? '-'), columns[i].w - 6))
-      const rowH = Math.max(16, Math.max(...wrapped.map(w => w.length)) * 10 + 6)
+    
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(9)
+    doc.setTextColor(0, 0, 0) // Black text
+    
+    rows.forEach((row, rowIndex) => {
+      const processedRow = row.map(cell => safeString(cell))
+      const wrapped = processedRow.map((cell, i) => doc.splitTextToSize(cell, columns[i].w - 8))
+      const rowH = Math.max(18, Math.max(...wrapped.map(w => w.length)) * 11 + 8)
+      
       if (y + rowH > pageHeight - marginY) {
-        doc.addPage(); y = marginY
-        let hx = startX; doc.setFont('helvetica', 'bold'); doc.setFontSize(10)
-        columns.forEach(col => { doc.rect(hx, y, col.w, headerH); doc.text(col.title, hx + 3, y + 12); hx += col.w })
-        y += headerH; doc.setFont('helvetica', 'normal'); doc.setFontSize(9)
+        doc.addPage()
+        y = 60
+        // Redraw header on new page
+        doc.setFont('helvetica', 'bold')
+        doc.setFontSize(10)
+        let nhx = startX
+        columns.forEach(col => { 
+          doc.rect(nhx, y, col.w, headerH, 'S')
+          doc.setTextColor(0, 0, 0)
+          doc.text(col.title, nhx + col.w / 2, y + 14, { align: 'center' })
+          nhx += col.w 
+        })
+        y += headerH
+        doc.setFont('helvetica', 'normal')
+        doc.setFontSize(9)
+        doc.setTextColor(0, 0, 0)
       }
+      
+      // Alternate row colors for better readability
+      if (rowIndex % 2 === 0) {
+        doc.setFillColor(252, 252, 252) // Very light gray
+        doc.rect(startX, y, columns.reduce((sum, col) => sum + col.w, 0), rowH, 'F')
+      }
+      
       let cx = startX
-      columns.forEach((col, i) => { doc.rect(cx, y, col.w, rowH); let ty = y + 12; wrapped[i].forEach(line => { doc.text(line, cx + 3, ty); ty += 10 }); cx += col.w })
+      columns.forEach((col, i) => { 
+        const align = col.align || 'left'
+        doc.rect(cx, y, col.w, rowH, 'S') // Stroke only
+        let ty = y + 13
+        wrapped[i].forEach(line => { 
+          if (align === 'center') {
+            doc.text(line, cx + col.w / 2, ty, { align: 'center' })
+          } else if (align === 'right') {
+            doc.text(line, cx + col.w - 4, ty, { align: 'right' })
+          } else {
+            doc.text(line, cx + 4, ty)
+          }
+          ty += 11 
+        })
+        cx += col.w 
+      })
       y += rowH
     })
     return y
@@ -127,65 +242,237 @@ export default function RectorDashboard() {
   function generatePdf(type) {
     const doc = new jsPDF({ unit: 'pt', format: 'a4' })
     const marginX = 40
+    const pageWidth = doc.internal.pageSize.getWidth()
     let y = 50
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(16)
-    doc.text(`${type === 'short' ? 'Short Leave' : 'Long Leave'} - ${selectedDate}`, marginX, y)
-    y += 14; doc.setFont('helvetica', 'normal'); doc.setFontSize(10)
-    try { doc.text(new Date(`${selectedDate}T00:00:00`).toLocaleDateString(), marginX, y) } catch { doc.text(selectedDate, marginX, y) }
-    y += 16
+    
+    // Enhanced Header
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(18)
+    doc.setTextColor(0, 0, 0)
+    const title = `${type === 'short' ? 'Short Leave Report' : 'Long Leave Report'}`
+    const titleWidth = doc.getTextWidth(title)
+    doc.text(title, (pageWidth - titleWidth) / 2, y) // Center the title
+    
+    y += 25
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(12)
+    doc.text(`Date: ${formatDate(selectedDate)}`, marginX, y)
+    doc.text(`Generated: ${formatDateTime(new Date().toISOString())}`, pageWidth - 200, y)
+    
+    y += 20
+    doc.setLineWidth(1)
+    doc.line(marginX, y, pageWidth - marginX, y) // Horizontal line
+    y += 20
+    
     const data = type === 'short' ? sls.filter(it => isOnDate(it.out_time, selectedDate)) : lls.filter(it => isOnDate(it.submit_time, selectedDate))
     const groupedBy = groupByHostel(data, it => it.student.hostel_no)
-    let hostelsList = Object.keys(groupedBy).sort(); if (selectedHostel !== 'All') hostelsList = hostelsList.filter(h => h === selectedHostel)
+    let hostelsList = Object.keys(groupedBy).sort()
+    if (selectedHostel !== 'All') hostelsList = hostelsList.filter(h => h === selectedHostel)
+    
+    let totalRecords = 0
+    
     hostelsList.forEach((h, i) => {
-      if (y > 740) { doc.addPage(); y = 50 }
-      doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.text(`Hostel ${h}`, marginX, y); y += 10
+      if (y > 720) { doc.addPage(); y = 60 }
+      
+      // Hostel header with better styling
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(14)
+      doc.setTextColor(0, 0, 0)
+      doc.text(`Hostel ${h}`, marginX, y)
+      
+      const hostelRecords = groupedBy[h].length
+      totalRecords += hostelRecords
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(10)
+      doc.text(`(${hostelRecords} record${hostelRecords !== 1 ? 's' : ''})`, marginX + 80, y)
+      y += 18
+      
       const cols = type === 'short'
-        ? [{title:'Name',w:100},{title:'Room',w:50},{title:'Reason',w:120},{title:'Out',w:95},{title:'Return',w:95},{title:'Status',w:45}]
-        : [{title:'Name',w:90},{title:'Room',w:50},{title:'Reason',w:115},{title:'From',w:60},{title:'To',w:60},{title:'Submitted',w:100},{title:'Status',w:40}]
+        ? [
+            { title: 'Name', w: 110, align: 'left' },
+            { title: 'Room', w: 50, align: 'center' },
+            { title: 'Reason', w: 130, align: 'left' },
+            { title: 'Out Time', w: 100, align: 'center' },
+            { title: 'Return Time', w: 100, align: 'center' },
+            { title: 'Status', w: 55, align: 'center' },
+          ]
+        : [
+            { title: 'Name', w: 100, align: 'left' },
+            { title: 'Room', w: 45, align: 'center' },
+            { title: 'Reason', w: 120, align: 'left' },
+            { title: 'From Date', w: 70, align: 'center' },
+            { title: 'To Date', w: 70, align: 'center' },
+            { title: 'Submitted', w: 100, align: 'center' },
+            { title: 'Status', w: 50, align: 'center' },
+          ]
+      
       const rows = groupedBy[h].map(it => type === 'short'
-        ? [it.student.name, it.student.room_no, it.reason, new Date(it.out_time).toLocaleString(), it.return_time ? new Date(it.return_time).toLocaleString() : '-', it.status]
-        : [it.student.name, it.student.room_no, it.reason, it.from_date ? new Date(it.from_date).toLocaleDateString() : '-', it.to_date ? new Date(it.to_date).toLocaleDateString() : (it.return_date ? new Date(it.return_date).toLocaleDateString() : '-'), new Date(it.submit_time).toLocaleString(), it.status])
+        ? [safeString(it.student?.name), safeString(it.student?.room_no), safeString(it.reason), formatDateTime(it.out_time), formatDateTime(it.return_time), safeString(it.status)]
+        : [safeString(it.student?.name), safeString(it.student?.room_no), safeString(it.reason), formatDate(it.from_date), formatDate(it.to_date || it.return_date), formatDateTime(it.submit_time), safeString(it.status)])
+      
       y = drawTable(doc, marginX, y + 6, cols, rows)
-      if (i < hostelsList.length - 1) y += 8
+      if (i < hostelsList.length - 1) y += 15
     })
+    
+    // Add summary at the end
+    if (y > 720) { doc.addPage(); y = 60 }
+    y += 20
+    doc.setLineWidth(1)
+    doc.line(marginX, y, pageWidth - marginX, y)
+    y += 20
+    
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(12)
+    doc.text('Summary:', marginX, y)
+    y += 18
+    
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(10)
+    doc.text(`Total ${type} leave records: ${totalRecords}`, marginX, y)
+    y += 14
+    doc.text(`Hostels covered: ${hostelsList.length}`, marginX, y)
+    y += 14
+    doc.text(`Report generated on: ${formatDateTime(new Date().toISOString())}`, marginX, y)
+    
     return doc
   }
 
   function generateCombinedPdf(dateStr = selectedDate) {
     const doc = new jsPDF({ unit: 'pt', format: 'a4' })
     const marginX = 40
+    const pageWidth = doc.internal.pageSize.getWidth()
     let y = 50
-    doc.setFont('helvetica','bold'); doc.setFontSize(16); doc.text(`Leaves - ${dateStr}`, marginX, y)
-    y += 14; doc.setFont('helvetica','normal'); doc.setFontSize(10)
-    try { doc.text(new Date(`${dateStr}T00:00:00`).toLocaleDateString(), marginX, y) } catch { doc.text(dateStr, marginX, y) }
-    y += 16
+    
+    // Enhanced Header
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(18)
+    doc.setTextColor(0, 0, 0)
+    const title = 'Complete Leave Report'
+    const titleWidth = doc.getTextWidth(title)
+    doc.text(title, (pageWidth - titleWidth) / 2, y)
+    
+    y += 25
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(12)
+    doc.text(`Date: ${formatDate(dateStr)}`, marginX, y)
+    doc.text(`Generated: ${formatDateTime(new Date().toISOString())}`, pageWidth - 200, y)
+    
+    y += 20
+    doc.setLineWidth(1)
+    doc.line(marginX, y, pageWidth - marginX, y)
+    y += 20
+    
     const shortData = sls.filter(it => isOnDate(it.out_time, dateStr))
     const shortGrouped = groupByHostel(shortData, it => it.student.hostel_no)
-    let shortHostels = Object.keys(shortGrouped).sort(); if (selectedHostel !== 'All') shortHostels = shortHostels.filter(h => h === selectedHostel)
+    let shortHostels = Object.keys(shortGrouped).sort()
+    if (selectedHostel !== 'All') shortHostels = shortHostels.filter(h => h === selectedHostel)
+    
+    let totalShortLeaves = 0
+    let totalLongLeaves = 0
+    
     if (shortHostels.length) {
-      doc.setFont('helvetica','bold'); doc.setFontSize(12); doc.text('Short Leaves', marginX, y); y += 14
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(14)
+      doc.setTextColor(0, 0, 0)
+      doc.text('SHORT LEAVES', marginX, y)
+      y += 20
+      
       shortHostels.forEach(h => {
-        if (y > 740) { doc.addPage(); y = 50 }
-        doc.setFont('helvetica','bold'); doc.text(`Hostel ${h}`, marginX, y); y += 10
-        const cols = [{title:'Name',w:100},{title:'Room',w:50},{title:'Reason',w:120},{title:'Out',w:95},{title:'Return',w:95},{title:'Status',w:45}]
-        const rows = shortGrouped[h].map(it => [it.student.name, it.student.room_no, it.reason, new Date(it.out_time).toLocaleString(), it.return_time ? new Date(it.return_time).toLocaleString() : '-', it.status])
+        if (y > 720) { doc.addPage(); y = 60 }
+        
+        doc.setFont('helvetica', 'bold')
+        doc.setFontSize(12)
+        doc.text(`Hostel ${h}`, marginX, y)
+        
+        const hostelRecords = shortGrouped[h].length
+        totalShortLeaves += hostelRecords
+        doc.setFont('helvetica', 'normal')
+        doc.setFontSize(10)
+        doc.text(`(${hostelRecords} record${hostelRecords !== 1 ? 's' : ''})`, marginX + 80, y)
+        y += 18
+        
+        const cols = [
+          { title: 'Name', w: 110, align: 'left' },
+          { title: 'Room', w: 50, align: 'center' },
+          { title: 'Reason', w: 130, align: 'left' },
+          { title: 'Out Time', w: 100, align: 'center' },
+          { title: 'Return Time', w: 100, align: 'center' },
+          { title: 'Status', w: 55, align: 'center' },
+        ]
+        const rows = shortGrouped[h].map(it => [safeString(it.student?.name), safeString(it.student?.room_no), safeString(it.reason), formatDateTime(it.out_time), formatDateTime(it.return_time), safeString(it.status)])
         y = drawTable(doc, marginX, y + 6, cols, rows)
+        y += 15
       })
-      y += 16
+      y += 20
     }
+    
     const longData = lls.filter(it => isOnDate(it.submit_time, dateStr))
     const longGrouped = groupByHostel(longData, it => it.student.hostel_no)
-    let longHostels = Object.keys(longGrouped).sort(); if (selectedHostel !== 'All') longHostels = longHostels.filter(h => h === selectedHostel)
+    let longHostels = Object.keys(longGrouped).sort()
+    if (selectedHostel !== 'All') longHostels = longHostels.filter(h => h === selectedHostel)
+    
     if (longHostels.length) {
-      doc.setFont('helvetica','bold'); doc.setFontSize(12); doc.text('Long Leaves', marginX, y); y += 14
+      if (y > 720) { doc.addPage(); y = 60 }
+      
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(14)
+      doc.setTextColor(0, 0, 0)
+      doc.text('LONG LEAVES', marginX, y)
+      y += 20
+      
       longHostels.forEach(h => {
-        if (y > 740) { doc.addPage(); y = 50 }
-        doc.setFont('helvetica','bold'); doc.text(`Hostel ${h}`, marginX, y); y += 10
-        const cols = [{title:'Name',w:90},{title:'Room',w:50},{title:'Reason',w:115},{title:'From',w:60},{title:'To',w:60},{title:'Submitted',w:100},{title:'Status',w:40}]
-        const rows = longGrouped[h].map(it => [it.student.name, it.student.room_no, it.reason, it.from_date ? new Date(it.from_date).toLocaleDateString() : '-', it.to_date ? new Date(it.to_date).toLocaleDateString() : (it.return_date ? new Date(it.return_date).toLocaleDateString() : '-'), new Date(it.submit_time).toLocaleString(), it.status])
+        if (y > 720) { doc.addPage(); y = 60 }
+        
+        doc.setFont('helvetica', 'bold')
+        doc.setFontSize(12)
+        doc.text(`Hostel ${h}`, marginX, y)
+        
+        const hostelRecords = longGrouped[h].length
+        totalLongLeaves += hostelRecords
+        doc.setFont('helvetica', 'normal')
+        doc.setFontSize(10)
+        doc.text(`(${hostelRecords} record${hostelRecords !== 1 ? 's' : ''})`, marginX + 80, y)
+        y += 18
+        
+        const cols = [
+          { title: 'Name', w: 100, align: 'left' },
+          { title: 'Room', w: 45, align: 'center' },
+          { title: 'Reason', w: 120, align: 'left' },
+          { title: 'From Date', w: 70, align: 'center' },
+          { title: 'To Date', w: 70, align: 'center' },
+          { title: 'Submitted', w: 100, align: 'center' },
+          { title: 'Status', w: 50, align: 'center' },
+        ]
+        const rows = longGrouped[h].map(it => [safeString(it.student?.name), safeString(it.student?.room_no), safeString(it.reason), formatDate(it.from_date), formatDate(it.to_date || it.return_date), formatDateTime(it.submit_time), safeString(it.status)])
         y = drawTable(doc, marginX, y + 6, cols, rows)
+        y += 15
       })
     }
+    
+    // Add comprehensive summary
+    if (y > 720) { doc.addPage(); y = 60 }
+    y += 20
+    doc.setLineWidth(1)
+    doc.line(marginX, y, pageWidth - marginX, y)
+    y += 20
+    
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(12)
+    doc.text('Summary:', marginX, y)
+    y += 18
+    
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(10)
+    doc.text(`Total short leave records: ${totalShortLeaves}`, marginX, y)
+    y += 14
+    doc.text(`Total long leave records: ${totalLongLeaves}`, marginX, y)
+    y += 14
+    doc.text(`Total leave records: ${totalShortLeaves + totalLongLeaves}`, marginX, y)
+    y += 14
+    doc.text(`Hostels covered: ${new Set([...shortHostels, ...longHostels]).size}`, marginX, y)
+    y += 14
+    doc.text(`Report generated on: ${formatDateTime(new Date().toISOString())}`, marginX, y)
+    
     return doc
   }
 
@@ -330,8 +617,64 @@ export default function RectorDashboard() {
               ) : (
                 <div className="space-y-6">
                   {tab === 'long' ? (
-                    <div className="bg-white/80 backdrop-blur-xl border border-amber-200 rounded-xl overflow-hidden shadow-lg shadow-amber-500/10">
-                      <table className="w-full text-sm">
+                    <div className="bg-white/80 backdrop-blur-xl border border-amber-200 rounded-xl overflow-hidden lg:overflow-visible shadow-lg shadow-amber-500/10">
+                      <div className="space-y-3 p-4 lg:hidden">
+                        {grouped[h].map(item => (
+                          <div key={`card-${item.id}`} className="border border-amber-200 rounded-xl bg-white/85 p-4 shadow-sm">
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <h3 className="text-sm font-semibold text-amber-950">{item.student.name}</h3>
+                                <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-amber-900/80">
+                                  <div>
+                                    <dt>Room</dt>
+                                    <dd className="font-semibold text-amber-950">{item.student.room_no}</dd>
+                                  </div>
+                                  <div>
+                                    <dt>Hostel</dt>
+                                    <dd className="font-semibold text-amber-950">{item.student.hostel_no}</dd>
+                                  </div>
+                                  <div className="col-span-2">
+                                    <dt>Reason</dt>
+                                    <dd className="font-semibold text-amber-950 break-words">{item.reason}</dd>
+                                  </div>
+                                  <div>
+                                    <dt>From</dt>
+                                    <dd className="font-semibold text-amber-950">{item.from_date ? new Date(item.from_date).toLocaleDateString() : '-'}</dd>
+                                  </div>
+                                  <div>
+                                    <dt>To</dt>
+                                    <dd className="font-semibold text-amber-950">{item.to_date ? new Date(item.to_date).toLocaleDateString() : (item.return_date ? new Date(item.return_date).toLocaleDateString() : '-')}</dd>
+                                  </div>
+                                  <div className="col-span-2">
+                                    <dt>Submitted</dt>
+                                    <dd className="font-semibold text-amber-950">{new Date(item.submit_time).toLocaleString()}</dd>
+                                  </div>
+                                </dl>
+                              </div>
+                              <StatusBadge status={item.status} />
+                            </div>
+                            {item.status === 'Pending' ? (
+                              <div className="mt-4 flex items-center gap-2">
+                                <button
+                                  onClick={() => approve.mutate(item.id)}
+                                  className="inline-flex items-center rounded-lg bg-emerald-600 text-white text-xs font-semibold px-3 py-1.5 hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                                >
+                                  Accept
+                                </button>
+                                <button
+                                  onClick={() => reject.mutate(item.id)}
+                                  className="inline-flex items-center rounded-lg bg-rose-600 text-white text-xs font-semibold px-3 py-1.5 hover:bg-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-500"
+                                >
+                                  Reject
+                                </button>
+                              </div>
+                            ) : null}
+                          </div>
+                        ))}
+                      </div>
+                      <div className="hidden lg:block">
+                        <div className="overflow-x-auto">
+                        <table className="w-full min-w-[800px] text-sm">
                         <thead className="bg-gradient-to-r from-amber-50 to-orange-50 border-b border-amber-200">
                           <tr>
                             <th className="text-left px-4 py-2 text-amber-900">Name</th>
@@ -358,20 +701,98 @@ export default function RectorDashboard() {
                               <td className="px-4 py-2"><StatusBadge status={item.status} /></td>
                               <td className="px-4 py-2">{item.status === 'Pending' ? (
                                 <div className="flex gap-2">
-                                  <button onClick={() => approve.mutate(item.id)} className="inline-flex items-center rounded-md bg-emerald-600 text-white text-xs font-semibold px-3 py-1.5 hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500">Approve</button>
+                                  <button onClick={() => approve.mutate(item.id)} className="inline-flex items-center rounded-md bg-emerald-600 text-white text-xs font-semibold px-3 py-1.5 hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500">Accept</button>
                                   <button onClick={() => reject.mutate(item.id)} className="inline-flex items-center rounded-md bg-rose-600 text-white text-xs font-semibold px-3 py-1.5 hover:bg-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-500">Reject</button>
                                 </div>
                               ) : null}</td>
                             </tr>
                           ))}
                         </tbody>
-                      </table>
+                        </table>
+                        </div>
+                      </div>
                     </div>
                   ) : (
                     <>
                       <div className="bg-white/80 backdrop-blur-xl border border-amber-200 rounded-xl overflow-hidden shadow-lg shadow-amber-500/10">
-                        <div className="px-4 py-2 bg-gradient-to-r from-amber-50 to-orange-50 border-b border-amber-200 text-sm font-semibold text-amber-900">Out</div>
+                        <div className="px-4 py-2 bg-gradient-to-r from-amber-50 to-orange-50 border-b border-amber-200 text-sm font-semibold text-amber-900">Pending</div>
                         <table className="w-full text-sm">
+                          <thead>
+                            <tr>
+                              <th className="text-left px-4 py-2 text-amber-900">Name</th>
+                              <th className="text-left px-4 py-2 text-amber-900">Room</th>
+                              <th className="text-left px-4 py-2 text-amber-900">Hostel</th>
+                              <th className="text-left px-4 py-2 text-amber-900">Reason</th>
+                              <th className="text-left px-4 py-2 text-amber-900">Requested</th>
+                              <th className="text-left px-4 py-2 text-amber-900">Status</th>
+                              <th className="text-left px-4 py-2 text-amber-900">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {grouped[h].filter(x => x.status === 'Pending').map(item => (
+                              <tr key={item.id} className="border-b last:border-b-0 border-amber-100">
+                                <td className="px-4 py-2 text-amber-950">{item.student.name}</td>
+                                <td className="px-4 py-2">{item.student.room_no}</td>
+                                <td className="px-4 py-2">{item.student.hostel_no}</td>
+                                <td className="px-4 py-2">{item.reason}</td>
+                                <td className="px-4 py-2">{item.created_at ? new Date(item.created_at).toLocaleString() : '-'}</td>
+                                <td className="px-4 py-2"><StatusBadge status={item.status} /></td>
+                                <td className="px-4 py-2">
+                                  <button onClick={() => {
+                                      if (!window.confirm(`Approve short leave for ${item.student?.name || 'student'}?`)) return;
+                                      markOut.mutate(item.id)
+                                    }}
+                                    className="inline-flex items-center rounded-md bg-emerald-600 text-white text-xs font-semibold px-3 py-1.5 hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 mr-2">Approve</button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      <div className="bg-white/80 backdrop-blur-xl border border-amber-200 rounded-xl overflow-hidden shadow-lg shadow-amber-500/10">
+                        <div className="px-4 py-2 bg-gradient-to-r from-amber-50 to-orange-50 border-b border-amber-200 text-sm font-semibold text-amber-900">Out</div>
+
+                        {/* Mobile cards (visible < lg) */}
+                        <div className="space-y-3 p-4 lg:hidden">
+                          {grouped[h].filter(x => x.status === 'Out').map(item => (
+                            <div key={`short-out-card-${item.id}`} className="border border-amber-200 rounded-xl bg-white/85 p-4 shadow-sm">
+                              <div className="flex items-start justify-between gap-3">
+                                <div>
+                                  <h3 className="text-sm font-semibold text-amber-950">{item.student.name}</h3>
+                                  <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-amber-900/80">
+                                    <div>
+                                      <dt>Room</dt>
+                                      <dd className="font-semibold text-amber-950">{item.student.room_no}</dd>
+                                    </div>
+                                    <div>
+                                      <dt>Hostel</dt>
+                                      <dd className="font-semibold text-amber-950">{item.student.hostel_no}</dd>
+                                    </div>
+                                    <div className="col-span-2">
+                                      <dt>Reason</dt>
+                                      <dd className="font-semibold text-amber-950 break-words">{item.reason}</dd>
+                                    </div>
+                                    <div>
+                                      <dt>Out</dt>
+                                      <dd className="font-semibold text-amber-950">{item.out_time ? new Date(item.out_time).toLocaleString() : '-'}</dd>
+                                    </div>
+                                    <div>
+                                      <dt>Return</dt>
+                                      <dd className="font-semibold text-amber-950">{item.return_time ? new Date(item.return_time).toLocaleString() : '-'}</dd>
+                                    </div>
+                                  </dl>
+                                </div>
+                                <StatusBadge status={item.status} />
+                              </div>
+                              <div className="mt-4 flex items-center gap-2">
+                                <button onClick={() => { if (!window.confirm(`Mark returned for ${item.student?.name || 'student'}?`)) return; markRet.mutate(item.id) }} className="inline-flex items-center rounded-lg bg-blue-600 text-white text-xs font-semibold px-3 py-1.5 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500">Return</button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Desktop table (visible >= lg) */}
+                        <table className="w-full text-sm hidden lg:table">
                           <thead>
                             <tr>
                               <th className="text-left px-4 py-2 text-amber-900">Name</th>
@@ -394,7 +815,9 @@ export default function RectorDashboard() {
                                 <td className="px-4 py-2">{new Date(item.out_time).toLocaleString()}</td>
                                 <td className="px-4 py-2">{item.return_time ? new Date(item.return_time).toLocaleString() : '-'}</td>
                                 <td className="px-4 py-2"><StatusBadge status={item.status} /></td>
-                                <td className="px-4 py-2"><button onClick={() => markRet.mutate(item.id)} className="inline-flex items-center rounded-md bg-blue-600 text-white text-xs font-semibold px-3 py-1.5 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500">Mark Returned</button></td>
+                                <td className="px-4 py-2 flex gap-2">
+                                  <button onClick={() => { if (!window.confirm(`Mark returned for ${item.student?.name || 'student'}?`)) return; markRet.mutate(item.id) }} className="inline-flex items-center rounded-md bg-blue-600 text-white text-xs font-semibold px-3 py-1.5 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500">Return</button>
+                                </td>
                               </tr>
                             ))}
                           </tbody>

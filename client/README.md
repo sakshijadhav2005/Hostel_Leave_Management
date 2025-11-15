@@ -21,55 +21,33 @@ A comprehensive web-based hostel management system built with React.js and Node.
 - **Leave Management**
   - View all leave applications
   - Approve/reject long leave requests
-  - Mark students as returned from short leave
   - Filter by date, hostel, and status
 - **Complaint Management**
   - View and respond to student complaints
-  - Track complaint resolution
 - **Dashboard Analytics**
   - Real-time statistics
-  - Export data to PDF
   - Share reports
 
 ### 🤖 Smart Chatbot
-- **Form Guidance**: Step-by-step instructions for all forms
 - **Voice Support**: Speech recognition and text-to-speech
 - **Hostel Information**: Fees, timing, capacity, and policies
 - **Smart Responses**: Context-aware answers to common questions
 
-## 🛠️ Tech Stack
 
 ### Frontend
-- **React.js** - UI framework
 - **Vite** - Build tool and dev server
 - **TailwindCSS** - Styling framework
 - **Lucide React** - Icon library
-- **React Query** - Data fetching and caching
 - **React Router** - Navigation
 
 ### Backend
 - **Node.js** - Runtime environment
 - **Express.js** - Web framework
 - **MongoDB** - Database
-- **Mongoose** - ODM for MongoDB
-- **JWT** - Authentication
-- **Socket.io** - Real-time communication
-
-## 🚀 Getting Started
-
 ### Prerequisites
 - Node.js (v16 or higher)
-- MongoDB
-- npm or yarn
-
-### Installation
-
-1. **Clone the repository**
    ```bash
    git clone https://github.com/sakshijadhav2005/Hostel_Leave_Management.git
-   cd Hostel_Leave_Management
-   ```
-
 2. **Install dependencies**
    ```bash
    # Install server dependencies
@@ -129,12 +107,6 @@ A comprehensive web-based hostel management system built with React.js and Node.
 4. **Generate Reports**: Export data and analytics
 
 ### Chatbot Commands
-- "Steps to fill short leave form"
-- "Steps to fill long leave form"
-- "Steps to fill complaint form"
-- "Hostel fees"
-- "Hostel timing"
-- "Number of hostels"
 
 ## 🏗️ Project Structure
 
@@ -159,15 +131,8 @@ hostel-management/
 ```
 
 ## 🔧 Configuration
-
-### Hostel Settings
-- **Operating Hours**: 6:00 AM - 9:00 PM
-- **Students per Room**: 3
 - **Available Hostels**: H1, H2, H3, H4, H5
 - **Annual Fees**: ₹46,000
-
-### Leave Policies
-- **Short Leave**: Same-day out/return, no approval needed
 - **Long Leave**: Multi-day, requires admin approval
 - **Submission Window**: 6:00 AM - 9:00 PM only
 
@@ -180,17 +145,12 @@ hostel-management/
 5. Open a Pull Request
 
 ## 📄 License
-
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 👥 Authors
-
-- **Sakshi Jadhav** - *Initial work* - [@sakshijadhav2005](https://github.com/sakshijadhav2005)
 
 ## 🙏 Acknowledgments
 
 - Thanks to all contributors who helped build this system
-- Inspired by the need for efficient hostel management
 - Built with modern web technologies for scalability
 
 ## 📞 Support

@@ -17,7 +17,7 @@ async function createLongLeave(req, res) {
   if (!from_date) return res.status(400).json({ error: 'from_date is required' })
   if (!emergency_contact) return res.status(400).json({ error: 'emergency_contact is required' })
   if (!address_during_leave) return res.status(400).json({ error: 'address_during_leave is required' })
-  const item = await LongLeave.create({ student_id: me._id, reason, submit_time: now(), return_date: to_date || return_date, from_date, to_date: to_date || return_date, emergency_contact, address_during_leave, status: 'Pending' })
+  const item = await LongLeave.create({ student_id: me._id, reason, return_date: to_date || return_date, from_date, to_date: to_date || return_date, emergency_contact, address_during_leave })
   const populated = await item.populate('student_id')
   emitUpdate('long_leave_created', populated)
   res.status(201).json(toDTO.longLeave(populated))
@@ -27,7 +27,11 @@ async function createShortLeave(req, res) {
   const me = getCurrentUser(req)
   const { reason } = req.body || {}
   if (!reason) return res.status(400).json({ error: 'reason is required' })
-  const item = await ShortLeave.create({ student_id: me._id, reason, out_time: now(), return_time: null, status: 'Out' })
+  const requestedAt = now()
+  const item = await ShortLeave.create({
+    student_id: me._id,
+    reason,
+  })
   const populated = await item.populate('student_id')
   emitUpdate('short_leave_created', populated)
   // Fire-and-forget email notification to rectors/admins
@@ -37,13 +41,13 @@ async function createShortLeave(req, res) {
         const rectors = await User.find({ role: { $in: ['admin', 'rector'] } })
         if (rectors && rectors.length) {
           const s = populated.student_id || {}
-          const when = populated.out_time ? new Date(populated.out_time).toLocaleString() : ''
-          const subject = `Student OUT: ${s.name || 'Student'} (${s.hostel_no || '-'}-${s.room_no || '-'})`
-          const text = `Student ${s.name || '-'} (Hostel ${s.hostel_no || '-'}, Room ${s.room_no || '-'}) went OUT at ${when}.\nReason: ${populated.reason || '-'}`
+          const when = new Date(requestedAt).toLocaleString()
+          const subject = `Short Leave Request: ${s.name || 'Student'} (${s.hostel_no || '-'}-${s.room_no || '-'})`
+          const text = `Student ${s.name || '-'} (Hostel ${s.hostel_no || '-'}, Room ${s.room_no || '-'}) requested a short leave at ${when}.\nReason: ${populated.reason || '-'}`
           const html = `<div>
             <p><strong>Student:</strong> ${s.name || '-'} (${s.role || 'student'})</p>
             <p><strong>Hostel:</strong> ${s.hostel_no || '-'} &nbsp; <strong>Room:</strong> ${s.room_no || '-'}</p>
-            <p><strong>Out time:</strong> ${when}</p>
+            <p><strong>Requested at:</strong> ${when}</p>
             <p><strong>Reason:</strong> ${populated.reason || '-'}</p>
           </div>`
           await Promise.allSettled(
@@ -60,9 +64,24 @@ async function returnShortLeave(req, res) {
   const { id } = req.params
   const it = await ShortLeave.findById(id)
   if (!it) return res.status(404).json({ error: 'Not found' })
-  if (it.status !== 'Out') return res.status(400).json({ error: 'Already returned' })
+  if (it.status && it.status !== 'Out') return res.status(400).json({ error: 'Already returned' })
   it.status = 'Returned'
   it.return_time = now()
+  await it.save()
+  const populated = await it.populate('student_id')
+  emitUpdate('short_leave_updated', populated)
+  res.json(toDTO.shortLeave(populated))
+}
+
+async function markShortOut(req, res) {
+  const { id } = req.params
+  const it = await ShortLeave.findById(id)
+  if (!it) return res.status(404).json({ error: 'Not found' })
+  if (it.status === 'Out') return res.status(400).json({ error: 'Already marked out' })
+  if (it.status === 'Returned') return res.status(400).json({ error: 'Already returned' })
+  it.status = 'Out'
+  it.out_time = now()
+  it.return_time = null
   await it.save()
   const populated = await it.populate('student_id')
   emitUpdate('short_leave_updated', populated)
@@ -117,8 +136,9 @@ async function markShortReturned(req, res) {
   const { id } = req.params
   const it = await ShortLeave.findById(id)
   if (!it) return res.status(404).json({ error: 'Not found' })
+  if (it.status && it.status !== 'Out') return res.status(400).json({ error: 'Already returned' })
   it.status = 'Returned'
-  it.return_time = it.return_time || now()
+  it.return_time = now()
   await it.save()
   const populated = await it.populate('student_id')
   emitUpdate('short_leave_updated', populated)
@@ -136,4 +156,5 @@ module.exports = {
   getRectorLongLeaves,
   getRectorShortLeaves,
   markShortReturned,
+  markShortOut,
 }

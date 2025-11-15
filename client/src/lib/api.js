@@ -103,6 +103,11 @@ export async function markShortLeaveReturned(id) {
   return data
 }
 
+export async function markShortLeaveOut(id) {
+  const { data } = await api.post(`/api/rector/short-leaves/${id}/mark-out`)
+  return data
+}
+
 export async function getRectorStudents() {
   const { data } = await api.get('/api/rector/students')
   return data

@@ -7,6 +7,8 @@ import { getMyLongLeaves, getMyShortLeaves, submitLongLeave, submitShortLeave, r
 import { Link, useNavigate } from 'react-router-dom'
 import { Home as HomeIcon, X } from 'lucide-react'
 import { useState, Fragment, useEffect } from 'react'
+import { io } from 'socket.io-client'
+import { API_URL } from '../lib/api'
 import { useAuth } from '../context/AuthContext.jsx'
 
 export default function StudentDashboard() {
@@ -24,6 +26,28 @@ export default function StudentDashboard() {
   const { data: lls = [] } = useQuery({ queryKey: ['me','long'], queryFn: getMyLongLeaves, refetchInterval: 5000 })
   const { data: sls = [] } = useQuery({ queryKey: ['me','short'], queryFn: getMyShortLeaves, refetchInterval: 5000 })
   const { data: complaints = [] } = useQuery({ queryKey: ['me','complaints'], queryFn: getUserComplaints, refetchInterval: 5000 })
+
+  // Realtime updates: refresh short-leave list when backend emits updates
+  useEffect(() => {
+    if (!user) return
+    try {
+      const socket = io(API_URL, { path: '/socket.io' })
+      const onShortUpdated = (payload) => {
+        // Only notify and refresh when the event is for the current user
+        try {
+          const sid = payload?.student?.id || payload?.student_id || null
+          if (sid && user.id && String(sid) === String(user.id)) {
+            const status = payload?.status || 'Updated'
+            toast.info(`Short leave status: ${status}`)
+            qc.invalidateQueries({ queryKey: ['me','short'] })
+          }
+        } catch (e) { qc.invalidateQueries({ queryKey: ['me','short'] }) }
+      }
+      socket.on('short_leave_updated', onShortUpdated)
+      socket.on('short_leave_created', onShortUpdated)
+      return () => { try { socket.off('short_leave_updated', onShortUpdated); socket.off('short_leave_created', onShortUpdated); socket.close() } catch {} }
+    } catch {}
+  }, [qc, user])
 
   const longMut = useMutation({ mutationFn: submitLongLeave, onSuccess: () => { toast.success('Long leave submitted'); qc.invalidateQueries({ queryKey: ['me','long'] }) } })
   const shortMut = useMutation({ mutationFn: submitShortLeave, onSuccess: () => { toast.success('Short leave submitted'); qc.invalidateQueries({ queryKey: ['me','short'] }) } })
@@ -127,7 +151,7 @@ export default function StudentDashboard() {
               </div>
               <div className="bg-gradient-to-br from-emerald-50 to-green-50 border border-emerald-200 rounded-lg p-3 lg:p-4">
                 <div className="text-lg lg:text-xl font-bold text-emerald-600">
-                  {sls.filter(it => isOnSelectedDate(it.out_time)).length}
+                  {sls.filter(it => it.status === 'Pending' || isOnSelectedDate(it.out_time)).length}
                 </div>
                 <div className="text-xs lg:text-sm text-emerald-800 font-medium">Short Leaves</div>
               </div>
@@ -185,13 +209,13 @@ export default function StudentDashboard() {
                 Short Leave Applications
               </h2>
               <div className="space-y-3 lg:space-y-4">
-                {sls.filter(it => isOnSelectedDate(it.out_time)).length === 0 ? (
+                {sls.filter(it => it.status === 'Pending' || isOnSelectedDate(it.out_time)).length === 0 ? (
                   <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 lg:p-6 text-center">
                     <div className="text-amber-600 text-sm sm:text-base">No short leave applications found for this date</div>
                   </div>
                 ) : (
                   <div className="grid gap-3 lg:gap-4 sm:grid-cols-1 xl:grid-cols-2">
-                    {sls.filter(it => isOnSelectedDate(it.out_time)).map(item => (
+                    {sls.filter(it => it.status === 'Pending' || isOnSelectedDate(it.out_time)).map(item => (
                       <LeaveCard key={item.id}
                         title={`Short Leave • ${item.student.name}`}
                         fields={[
