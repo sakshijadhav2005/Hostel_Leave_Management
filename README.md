@@ -132,7 +132,7 @@ hostel-management/
 
 ## 📞 Support
 
-For support, email sakshijadhav2005@example.com or create an issue in the repository.
+For support, email sakshijadhav389@gmail.com or create an issue in the repository.
 
 ---
 
